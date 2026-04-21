@@ -1,17 +1,74 @@
-# squirrel
+# Squirrel — Manage Your Money
 
-A new Flutter project.
+Squirrel is a Flutter-based personal finance tracker focused on helping you manage spending, budgets, portfolio holdings, and financial insights in one place.
+
+## Features
+
+- Dashboard with spending/income overview
+- Transaction tracking with categories
+- Budget setup and progress monitoring
+- Portfolio holdings management
+- Analytics screen for trends and breakdowns
+- Local data persistence using SQLite
+- Data export support (CSV/JSON)
+
+## Tech Stack
+
+- Flutter (Dart)
+- Provider (state management)
+- SQLite (`sqflite`)
+- `fl_chart` for visual analytics
+
+## Project Structure
+
+```text
+lib/
+  core/         # constants, theme, utils, database, services
+  models/       # data models (transactions, budgets, holdings, reminders)
+  providers/    # app state providers
+  screens/      # feature screens (dashboard, transactions, budget, etc.)
+  widgets/      # reusable UI components
+```
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+### Prerequisites
 
-A few resources to get you started if this is your first Flutter project:
+- Flutter SDK (compatible with Dart SDK `^3.6.0`)
+- Android Studio / Xcode (for mobile targets)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### Installation
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+git clone https://github.com/AlexxBenny/Squirrel-manage-your-money.git
+cd Squirrel-manage-your-money
+flutter pub get
+```
+
+### Run the App
+
+```bash
+flutter run
+```
+
+### Development Checks
+
+```bash
+flutter analyze
+flutter test
+```
+
+## Platforms
+
+This repository includes Flutter platform folders for:
+
+- Android
+- iOS
+- Web
+- Windows
+- macOS
+- Linux
+
+## License
+
+No license file is currently included in this repository.
