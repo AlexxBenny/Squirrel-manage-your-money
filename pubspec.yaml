@@ -16,8 +16,9 @@ dependencies:
   # State Management
   provider: ^6.1.2
 
-  # Database
+  # Database (mobile + desktop + web)
   sqflite: ^2.3.3+1
+  sqflite_common_ffi: ^2.3.4
   path: ^1.9.0
 
   # Charts
@@ -43,13 +44,36 @@ dependencies:
   # Networking (live prices)
   http: ^1.2.2
 
+  # URL launching
+  url_launcher: ^6.3.1
+
   # Animations
   flutter_animate: ^4.5.2
+
+  # Security
+  local_auth: ^2.3.0
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "images/favicon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "images/favicon.png"
+  web:
+    generate: true
+    image_path: "images/favicon.png"
+  windows:
+    generate: true
+    image_path: "images/favicon.png"
+    icon_size: 48

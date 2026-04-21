@@ -7,6 +7,7 @@ class AppCategory {
   final String emoji;
   final Color color;
   final bool isIncome;
+  final bool isCustom;
 
   const AppCategory({
     required this.id,
@@ -14,11 +15,34 @@ class AppCategory {
     required this.emoji,
     required this.color,
     this.isIncome = false,
+    this.isCustom = false,
   });
+
+  factory AppCategory.fromMap(Map<String, dynamic> map) => AppCategory(
+    id: map['id'] as String,
+    name: map['name'] as String,
+    emoji: map['emoji'] as String? ?? '💸',
+    color: Color(map['color_value'] as int? ?? 0xFF8B92A9),
+    isIncome: (map['is_income'] as int? ?? 0) == 1,
+    isCustom: true,
+  );
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'name': name,
+    'emoji': emoji,
+    'color_value': color.value,
+    'is_income': isIncome ? 1 : 0,
+  };
 }
 
 class Categories {
   Categories._();
+
+  // ── Custom category registry (populated by CategoryProvider on load) ────
+  static List<AppCategory> _custom = [];
+  static void setCustom(List<AppCategory> cats) { _custom = cats; }
+  static List<AppCategory> get custom => _custom;
 
   static const List<AppCategory> expense = [
     AppCategory(id: 'food', name: 'Food & Dining', emoji: '🍔', color: Color(0xFFFF6B6B)),
@@ -47,29 +71,55 @@ class Categories {
 
   static AppCategory? findById(String id) {
     try {
-      return [...expense, ...income].firstWhere((c) => c.id == id);
-    } catch (_) {
-      return null;
-    }
+      return [...expense, ...income, ..._custom].firstWhere((c) => c.id == id);
+    } catch (_) { return null; }
   }
 
-  static Color colorFor(String categoryId) {
-    return AppColors.categoryColors[categoryId] ?? AppColors.text2;
-  }
+  static Color colorFor(String categoryId) =>
+      findById(categoryId)?.color ?? AppColors.text2;
 
-  static String emojiFor(String categoryId) {
-    return findById(categoryId)?.emoji ?? '💰';
-  }
+  static String emojiFor(String categoryId) =>
+      findById(categoryId)?.emoji ?? '💰';
 }
 
 class AssetClasses {
   static const List<Map<String, dynamic>> all = [
-    {'id': 'stock', 'name': 'Stocks', 'emoji': '📈', 'color': 0xFF6C63FF},
-    {'id': 'crypto', 'name': 'Crypto', 'emoji': '🪙', 'color': 0xFFFFB800},
-    {'id': 'mutual_fund', 'name': 'Mutual Funds', 'emoji': '📊', 'color': 0xFF00D9A3},
-    {'id': 'gold', 'name': 'Gold', 'emoji': '🥇', 'color': 0xFFE67E22},
-    {'id': 'fd', 'name': 'Fixed Deposit', 'emoji': '🏦', 'color': 0xFF4DA6FF},
-    {'id': 'real_estate', 'name': 'Real Estate', 'emoji': '🏠', 'color': 0xFF9B59B6},
-    {'id': 'other_asset', 'name': 'Other', 'emoji': '💼', 'color': 0xFF8B92A9},
+    {
+      'id': 'stock', 'name': 'Stocks', 'emoji': '📈', 'color': 0xFF6C63FF,
+      'desc': 'Equity shares on NSE/BSE', 'risk': 'market_linked',
+    },
+    {
+      'id': 'mutual_fund', 'name': 'Mutual Fund', 'emoji': '📊', 'color': 0xFF00D9A3,
+      'desc': 'SIP or lump sum in any AMC', 'risk': 'market_linked',
+    },
+    {
+      'id': 'crypto', 'name': 'Crypto', 'emoji': '🪙', 'color': 0xFFFFB800,
+      'desc': 'Bitcoin, ETH, altcoins', 'risk': 'market_linked',
+    },
+    {
+      'id': 'gold', 'name': 'Gold', 'emoji': '🥇', 'color': 0xFFE67E22,
+      'desc': 'Physical, SGB, ETF, Digital', 'risk': 'market_linked',
+    },
+    {
+      'id': 'fd', 'name': 'Fixed Deposit', 'emoji': '🏛️', 'color': 0xFF4DA6FF,
+      'desc': 'Bank FD, corporate FD, SCSS', 'risk': 'fixed_income',
+    },
+    {
+      'id': 'real_estate', 'name': 'Real Estate', 'emoji': '🏠', 'color': 0xFF9B59B6,
+      'desc': 'Property, REIT', 'risk': 'fixed_income',
+    },
+    {
+      'id': 'other_asset', 'name': 'Other', 'emoji': '💼', 'color': 0xFF8B92A9,
+      'desc': 'PPF, NPS, EPF, Bonds, P2P', 'risk': 'fixed_income',
+    },
   ];
+
+  static Map<String, dynamic>? findById(String id) {
+    try { return all.firstWhere((a) => a['id'] == id); } catch (_) { return null; }
+  }
+
+  static String emojiFor(String id) => findById(id)?['emoji'] as String? ?? '💼';
+  static String nameFor(String id)  => findById(id)?['name']  as String? ?? id;
+  static int    colorFor(String id) => findById(id)?['color'] as int?    ?? 0xFF8B92A9;
+  static bool   isMarketLinked(String id) => findById(id)?['risk'] == 'market_linked';
 }

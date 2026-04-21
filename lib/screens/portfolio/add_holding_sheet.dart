@@ -1,146 +1,205 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/categories.dart';
 import '../../providers/portfolio_provider.dart';
+import 'holding_forms/mf_form.dart';
+import 'holding_forms/stock_form.dart';
+import 'holding_forms/crypto_form.dart';
+import 'holding_forms/gold_form.dart';
+import 'holding_forms/fd_form.dart';
+import 'holding_forms/real_estate_form.dart';
+import 'holding_forms/other_form.dart';
 
 class AddHoldingSheet extends StatefulWidget {
   const AddHoldingSheet({super.key});
 
-  static Future<void> show(BuildContext context) {
-    return showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-      builder: (_) => const AddHoldingSheet(),
-    );
-  }
+  static Future<void> show(BuildContext context) => showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => const AddHoldingSheet(),
+  );
 
   @override
   State<AddHoldingSheet> createState() => _AddHoldingSheetState();
 }
 
 class _AddHoldingSheetState extends State<AddHoldingSheet> {
-  String _assetClass = 'stock';
-  final _nameController = TextEditingController();
-  final _tickerController = TextEditingController();
-  final _qtyController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _exchangeController = TextEditingController();
+  String _assetClass = 'mutual_fund';
   bool _isSaving = false;
 
-  @override
-  void dispose() {
-    _nameController.dispose(); _tickerController.dispose();
-    _qtyController.dispose(); _priceController.dispose();
-    _exchangeController.dispose(); super.dispose();
-  }
+  // Form keys — one per asset type
+  final _mfKey   = GlobalKey<MfFormState>();
+  final _stKey   = GlobalKey<StockFormState>();
+  final _crKey   = GlobalKey<CryptoFormState>();
+  final _goKey   = GlobalKey<GoldFormState>();
+  final _fdKey   = GlobalKey<FdFormState>();
+  final _reKey   = GlobalKey<RealEstateFormState>();
+  final _otKey   = GlobalKey<OtherFormState>();
 
   Future<void> _save() async {
-    if (_nameController.text.isEmpty || _tickerController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter name and ticker')));
-      return;
-    }
-    final qty = double.tryParse(_qtyController.text);
-    final price = double.tryParse(_priceController.text);
-    if (qty == null || qty <= 0 || price == null || price <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid quantity and price')));
-      return;
-    }
     setState(() => _isSaving = true);
     try {
-      await context.read<PortfolioProvider>().addHolding(
-        name: _nameController.text.trim(),
-        ticker: _tickerController.text.trim().toUpperCase(),
-        assetClass: _assetClass,
-        quantity: qty, avgBuyPrice: price,
-        exchange: _exchangeController.text.trim().isEmpty ? null : _exchangeController.text.trim().toUpperCase(),
-      );
+      final id = const Uuid().v4();
+      final holding = switch (_assetClass) {
+        'mutual_fund'  => _mfKey.currentState?.buildHolding(id),
+        'stock'        => _stKey.currentState?.buildHolding(id),
+        'crypto'       => _crKey.currentState?.buildHolding(id),
+        'gold'         => _goKey.currentState?.buildHolding(id),
+        'fd'           => _fdKey.currentState?.buildHolding(id),
+        'real_estate'  => _reKey.currentState?.buildHolding(id),
+        'other_asset'  => _otKey.currentState?.buildHolding(id),
+        _              => null,
+      };
+      if (holding == null) return;
+      await context.read<PortfolioProvider>().addHolding(holding);
       if (mounted) Navigator.pop(context);
-    } finally { if (mounted) setState(() => _isSaving = false); }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
       padding: EdgeInsets.only(bottom: bottom),
-      decoration: const BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
-          const SizedBox(height: 20),
-          Text('Add Holding', style: GoogleFonts.inter(color: AppColors.text1, fontSize: 20, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 20),
-
-          // Asset class chips
-          Text('Asset Class', style: GoogleFonts.inter(color: AppColors.text2, fontSize: 13, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: AssetClasses.all.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final ac = AssetClasses.all[i];
-                final selected = _assetClass == ac['id'];
-                final color = Color(ac['color'] as int);
-                return GestureDetector(
-                  onTap: () => setState(() => _assetClass = ac['id'] as String),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected ? color.withOpacity(0.2) : AppColors.surface2,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: selected ? color : AppColors.border),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text(ac['emoji'] as String, style: const TextStyle(fontSize: 14)),
-                      const SizedBox(width: 6),
-                      Text(ac['name'] as String, style: GoogleFonts.inter(color: selected ? color : AppColors.text2, fontSize: 12, fontWeight: FontWeight.w600)),
-                    ]),
-                  ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(controller: _nameController, style: GoogleFonts.inter(color: AppColors.text1, fontSize: 14),
-            decoration: const InputDecoration(hintText: 'e.g. Reliance Industries', labelText: 'Asset Name'),
-          ),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextField(controller: _tickerController, style: GoogleFonts.inter(color: AppColors.text1, fontSize: 14),
-              decoration: const InputDecoration(hintText: 'e.g. RELIANCE', labelText: 'Ticker Symbol'),
-              textCapitalization: TextCapitalization.characters,
-            )),
-            const SizedBox(width: 12),
-            Expanded(child: TextField(controller: _exchangeController, style: GoogleFonts.inter(color: AppColors.text1, fontSize: 14),
-              decoration: const InputDecoration(hintText: 'NSE / BSE', labelText: 'Exchange (optional)'),
-              textCapitalization: TextCapitalization.characters,
-            )),
-          ]),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: TextField(controller: _qtyController, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: GoogleFonts.inter(color: AppColors.text1, fontSize: 14),
-              decoration: const InputDecoration(hintText: '10', labelText: 'Quantity'),
-            )),
-            const SizedBox(width: 12),
-            Expanded(child: TextField(controller: _priceController, keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: GoogleFonts.inter(color: AppColors.text1, fontSize: 14),
-              decoration: const InputDecoration(hintText: '2500', labelText: 'Avg Buy Price (₹)', prefixText: '₹  '),
-            )),
-          ]),
-          const SizedBox(height: 24),
-          SizedBox(width: double.infinity, child: ElevatedButton(
-            onPressed: _isSaving ? null : _save,
-            child: _isSaving ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Add to Portfolio'),
-          )),
-        ]),
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
+      child: Column(children: [
+        // Handle
+        const SizedBox(height: 12),
+        Center(child: Container(width: 40, height: 4,
+          decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
+        const SizedBox(height: 16),
+        // Header
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Text('Add Investment', style: GoogleFonts.inter(
+              color: AppColors.text1, fontSize: 20, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            TextButton(onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: AppColors.text3))),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        // Asset class selector
+        SizedBox(height: 100, child: _AssetClassPicker(
+          selected: _assetClass,
+          onChanged: (v) => setState(() => _assetClass = v),
+        )),
+        const Divider(height: 1),
+        // Form body
+        Expanded(child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          child: switch (_assetClass) {
+            'mutual_fund'  => MfForm(key: _mfKey),
+            'stock'        => StockForm(key: _stKey),
+            'crypto'       => CryptoForm(key: _crKey),
+            'gold'         => GoldForm(key: _goKey),
+            'fd'           => FdForm(key: _fdKey),
+            'real_estate'  => RealEstateForm(key: _reKey),
+            _              => OtherForm(key: _otKey),
+          },
+        )),
+        // Save button
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: SizedBox(width: double.infinity, child: ElevatedButton(
+            onPressed: _isSaving ? null : _save,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Color(AssetClasses.colorFor(_assetClass)),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            ),
+            child: _isSaving
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : Text('Save ${AssetClasses.nameFor(_assetClass)}',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15)),
+          )),
+        ),
+      ]),
     );
   }
 }
+
+class _AssetClassPicker extends StatelessWidget {
+  final String selected;
+  final ValueChanged<String> onChanged;
+  const _AssetClassPicker({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      itemCount: AssetClasses.all.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 10),
+      itemBuilder: (_, i) {
+        final ac = AssetClasses.all[i];
+        final id = ac['id'] as String;
+        final color = Color(ac['color'] as int);
+        final sel = selected == id;
+        return GestureDetector(
+          onTap: () => onChanged(id),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 82,
+            decoration: BoxDecoration(
+              color: sel ? color.withValues(alpha: 0.12) : AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: sel ? color : AppColors.border, width: sel ? 2 : 1),
+            ),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(ac['emoji'] as String, style: const TextStyle(fontSize: 26)),
+              const SizedBox(height: 4),
+              Text(ac['name'] as String,
+                style: GoogleFonts.inter(
+                  color: sel ? color : AppColors.text2,
+                  fontSize: 10, fontWeight: FontWeight.w700),
+                textAlign: TextAlign.center, maxLines: 2),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ── Shared form field helpers used across all sub-forms ────────────────────
+
+Widget formLabel(String text) => Padding(
+  padding: const EdgeInsets.only(bottom: 6),
+  child: Text(text, style: GoogleFonts.inter(
+    color: AppColors.text2, fontSize: 12, fontWeight: FontWeight.w600)),
+);
+
+InputDecoration fieldDec(String hint, {String? prefix, String? suffix, IconData? icon}) =>
+  InputDecoration(
+    hintText: hint,
+    prefixText: prefix,
+    suffixText: suffix,
+    prefixIcon: icon != null ? Icon(icon, size: 18, color: AppColors.text3) : null,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
+    filled: true, fillColor: AppColors.surface,
+    hintStyle: GoogleFonts.inter(color: AppColors.text3, fontSize: 13),
+  );
+
+Widget formSection(String title) => Padding(
+  padding: const EdgeInsets.only(top: 20, bottom: 10),
+  child: Text(title.toUpperCase(), style: GoogleFonts.inter(
+    color: AppColors.text3, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+);
+
+TextEditingController ctrl([String v = '']) => TextEditingController(text: v);

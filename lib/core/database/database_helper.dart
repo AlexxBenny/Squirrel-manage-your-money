@@ -17,8 +17,9 @@ class DatabaseHelper {
     final path = join(dbPath, 'finance_os.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 5,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -52,13 +53,19 @@ class DatabaseHelper {
       CREATE TABLE holdings (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        ticker TEXT NOT NULL,
+        ticker TEXT,
         asset_class TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        avg_buy_price REAL NOT NULL,
-        currency TEXT DEFAULT 'INR',
+        invested_amount REAL NOT NULL DEFAULT 0,
+        current_value_override REAL,
+        quantity REAL,
+        avg_buy_price REAL,
         exchange TEXT,
+        sip_day INTEGER,
+        maturity_date TEXT,
+        alert_enabled INTEGER NOT NULL DEFAULT 1,
+        meta TEXT,
         notes TEXT,
+        currency TEXT DEFAULT 'INR',
         created_at TEXT NOT NULL
       )
     ''');
@@ -85,10 +92,100 @@ class DatabaseHelper {
       )
     ''');
 
+    // Custom tags table
+    await db.execute('''
+      CREATE TABLE custom_tags (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        emoji TEXT NOT NULL DEFAULT '🏷️',
+        color_value INTEGER NOT NULL DEFAULT 2521573,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE custom_categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        emoji TEXT NOT NULL DEFAULT '💸',
+        color_value INTEGER NOT NULL DEFAULT 9147561,
+        is_income INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        emoji TEXT NOT NULL DEFAULT '🎯',
+        category TEXT NOT NULL DEFAULT 'other',
+        target_amount REAL NOT NULL,
+        current_amount REAL NOT NULL DEFAULT 0,
+        target_date TEXT,
+        linked_holding_ids TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     // Indexes for performance
     await db.execute('CREATE INDEX idx_tx_date ON transactions(date)');
     await db.execute('CREATE INDEX idx_tx_category ON transactions(category)');
     await db.execute('CREATE INDEX idx_tx_type ON transactions(type)');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS custom_tags (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          emoji TEXT NOT NULL DEFAULT '🏷️',
+          color_value INTEGER NOT NULL DEFAULT 2521573,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS custom_categories (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          emoji TEXT NOT NULL DEFAULT '💸',
+          color_value INTEGER NOT NULL DEFAULT 9147561,
+          is_income INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 4) {
+      // Add rich portfolio fields to holdings
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN invested_amount REAL NOT NULL DEFAULT 0'); } catch (_) {}
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN current_value_override REAL'); } catch (_) {}
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN sip_day INTEGER'); } catch (_) {}
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN maturity_date TEXT'); } catch (_) {}
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN alert_enabled INTEGER NOT NULL DEFAULT 1'); } catch (_) {}
+      try { await db.execute('ALTER TABLE holdings ADD COLUMN meta TEXT'); } catch (_) {}
+      // ticker and quantity now nullable for FD/RE/Other
+      try { await db.execute("UPDATE holdings SET invested_amount = COALESCE(quantity,0) * COALESCE(avg_buy_price,0) WHERE invested_amount = 0"); } catch (_) {}
+    }
+    if (oldVersion < 5) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS goals (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          emoji TEXT NOT NULL DEFAULT '🎯',
+          category TEXT NOT NULL DEFAULT 'other',
+          target_amount REAL NOT NULL,
+          current_amount REAL NOT NULL DEFAULT 0,
+          target_date TEXT,
+          linked_holding_ids TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
   }
 
   // ─── Transactions ─────────────────────────────────────────────────────────
@@ -237,6 +334,70 @@ class DatabaseHelper {
     return results.isEmpty ? null : results.first;
   }
 
+  // ─── Custom Tags ──────────────────────────────────────────────────────────
+
+  Future<int> insertTag(Map<String, dynamic> tag) async {
+    final db = await database;
+    return await db.insert('custom_tags', tag, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Map<String, dynamic>>> getTags() async {
+    final db = await database;
+    return await db.query('custom_tags', orderBy: 'created_at ASC');
+  }
+
+  Future<int> deleteTag(String id) async {
+    final db = await database;
+    return await db.delete('custom_tags', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Returns total spent (expenses) grouped by tag ID.
+  /// Note: A transaction can appear in multiple tags without double-counting
+  /// category totals — tags are an independent organizational dimension.
+  Future<Map<String, double>> getTagTotals({DateTime? from, DateTime? to}) async {
+    final db = await database;
+    final conditions = ['type = ?', "tags IS NOT NULL", "tags != ''"];
+    final args = <dynamic>['expense'];
+    if (from != null) { conditions.add('date >= ?'); args.add(from.toIso8601String()); }
+    if (to != null)   { conditions.add('date <= ?'); args.add(to.toIso8601String()); }
+
+    final rows = await db.query(
+      'transactions',
+      columns: ['tags', 'amount'],
+      where: conditions.join(' AND '),
+      whereArgs: args,
+    );
+
+    final totals = <String, double>{};
+    for (final row in rows) {
+      final tagStr = row['tags'] as String;
+      final amount = (row['amount'] as num).toDouble();
+      for (final tagId in tagStr.split(',').map((s) => s.trim())) {
+        if (tagId.isNotEmpty) {
+          totals[tagId] = (totals[tagId] ?? 0) + amount;
+        }
+      }
+    }
+    return totals;
+  }
+
+  // ─── Custom Categories ─────────────────────────────────────────────────────
+
+  Future<int> insertCategory(Map<String, dynamic> cat) async {
+    final db = await database;
+    return await db.insert('custom_categories', cat, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Map<String, dynamic>>> getCustomCategories() async {
+    final db = await database;
+    return await db.query('custom_categories', orderBy: 'created_at ASC');
+  }
+
+  Future<int> deleteCategory(String id) async {
+    final db = await database;
+    return await db.delete('custom_categories', where: 'id = ?', whereArgs: [id]);
+  }
+
   // ─── Export ───────────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getAllTransactionsRaw() async {
@@ -251,5 +412,30 @@ class DatabaseHelper {
     await db.delete('holdings');
     await db.delete('reminders');
     await db.delete('price_cache');
+    await db.delete('custom_tags');
+    await db.delete('custom_categories');
+    await db.delete('goals');
+  }
+
+  // ─── Goals ────────────────────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getGoals() async {
+    final db = await database;
+    return await db.query('goals', orderBy: 'created_at DESC');
+  }
+
+  Future<void> insertGoal(Map<String, dynamic> goal) async {
+    final db = await database;
+    await db.insert('goals', goal, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> updateGoal(Map<String, dynamic> goal) async {
+    final db = await database;
+    await db.update('goals', goal, where: 'id = ?', whereArgs: [goal['id']]);
+  }
+
+  Future<void> deleteGoal(String id) async {
+    final db = await database;
+    await db.delete('goals', where: 'id = ?', whereArgs: [id]);
   }
 }

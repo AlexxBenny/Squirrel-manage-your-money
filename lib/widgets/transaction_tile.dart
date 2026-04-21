@@ -32,36 +32,41 @@ class TransactionTile extends StatelessWidget {
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
         decoration: BoxDecoration(
-          color: AppColors.expense.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
+          color: AppColors.expense.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
         ),
-        child: const Icon(Icons.delete_outline, color: AppColors.expense),
+        child: const Icon(Icons.delete_outline_rounded, color: AppColors.expense, size: 22),
       ),
       onDismissed: (_) => onDelete?.call(),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Row(
             children: [
-              // Category icon
               Container(
-                width: 44,
-                height: 44,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 alignment: Alignment.center,
-                child: Text(emoji, style: const TextStyle(fontSize: 20)),
+                child: Text(emoji, style: const TextStyle(fontSize: 22)),
               ),
               const SizedBox(width: 12),
-              // Details
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,7 +85,7 @@ class TransactionTile extends StatelessWidget {
                           ? transaction.note!
                           : DateHelpers.relative(transaction.date),
                       style: GoogleFonts.inter(
-                        color: AppColors.text2,
+                        color: AppColors.text3,
                         fontSize: 12,
                       ),
                       maxLines: 1,
@@ -89,9 +94,10 @@ class TransactionTile extends StatelessWidget {
                   ],
                 ),
               ),
-              // Amount
+              const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     '${isExpense ? '-' : '+'}${CurrencyFormatter.format(transaction.amount)}',
