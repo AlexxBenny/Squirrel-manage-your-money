@@ -22,6 +22,9 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // FIX #10: Computed once after data loads, not on every Consumer rebuild.
+  List<Insight> _insights = [];
+
   @override
   void initState() {
     super.initState();
@@ -29,14 +32,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _load() async {
-    final txProvider = context.read<TransactionProvider>();
-    final budgetProvider = context.read<BudgetProvider>();
+    final txProvider        = context.read<TransactionProvider>();
+    final budgetProvider    = context.read<BudgetProvider>();
     final portfolioProvider = context.read<PortfolioProvider>();
-    final categoryProvider = context.read<CategoryProvider>();
+    final categoryProvider  = context.read<CategoryProvider>();
     await categoryProvider.loadCategories();
     await txProvider.loadTransactions();
     await budgetProvider.loadBudgets(transactions: txProvider.transactions);
     await portfolioProvider.loadHoldings();
+    // Compute insights once here; never inside the Consumer builder.
+    if (mounted) {
+      setState(() {
+        _insights = InsightEngine.generate(
+          transactions: txProvider.transactions,
+          budgetStatuses: budgetProvider.statuses,
+          holdings: portfolioProvider.holdings,
+          totalIncome: txProvider.totalIncome,
+          totalExpenses: txProvider.totalExpenses,
+        );
+      });
+    }
   }
 
   @override
@@ -48,16 +63,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         color: AppColors.primary,
         child: Consumer3<TransactionProvider, BudgetProvider, PortfolioProvider>(
           builder: (_, txProvider, budgetProvider, portfolioProvider, __) {
-            final income = txProvider.totalIncome;
+            final income   = txProvider.totalIncome;
             final expenses = txProvider.totalExpenses;
-            final savings = txProvider.netSavings;
-            final insights = InsightEngine.generate(
-              transactions: txProvider.transactions,
-              budgetStatuses: budgetProvider.statuses,
-              holdings: portfolioProvider.holdings,
-              totalIncome: income,
-              totalExpenses: expenses,
-            );
+            final savings  = txProvider.netSavings;
 
             return CustomScrollView(
               slivers: [
@@ -144,11 +152,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
 
                       // Insights — full width vertical
-                      if (insights.isNotEmpty) ...[
+                      if (_insights.isNotEmpty) ...[
                         const SizedBox(height: 24),
                         _SectionHeader(title: 'Smart Insights', icon: Icons.auto_awesome_rounded, iconColor: AppColors.primary),
                         const SizedBox(height: 12),
-                        ...insights.map((insight) => Padding(
+                        ..._insights.map((insight) => Padding(
                           padding: const EdgeInsets.only(bottom: 10),
                           child: _InsightCard(insight: insight),
                         )),

@@ -26,12 +26,15 @@ class _NewsScreenState extends State<NewsScreen> {
   }
 
   Future<void> _fetch() async {
+    if (!mounted) return;
     setState(() { _loading = true; _error = ''; });
     try {
       final holdings = context.read<PortfolioProvider>().holdings;
       final items = await NewsService.fetchForHoldings(holdings);
+      if (!mounted) return;
       setState(() { _news = items; _loading = false; });
     } catch (e) {
+      if (!mounted) return;
       setState(() { _error = 'Failed to load news'; _loading = false; });
     }
   }

@@ -24,6 +24,8 @@ class AnalyticsScreen extends StatefulWidget {
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   Map<String, List<double>>? _trend;
   bool _loadingTrend = true;
+  // FIX #10: Cached result, recomputed only when data reloads.
+  List<Insight> _insights = [];
 
   @override
   void initState() {
@@ -32,7 +34,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Future<void> _load() async {
-    final tx = context.read<TransactionProvider>();
+    final tx          = context.read<TransactionProvider>();
+    final bp          = context.read<BudgetProvider>();
+    final pp          = context.read<PortfolioProvider>();
     final tagProvider = context.read<TagProvider>();
     await tx.loadTransactions();
     await tagProvider.loadTags();
@@ -41,7 +45,19 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       to: DateHelpers.endOfMonth(tx.selectedMonth),
     );
     final trend = await tx.getMonthlyTrend();
-    if (mounted) setState(() { _trend = trend; _loadingTrend = false; });
+    if (mounted) {
+      setState(() {
+        _trend        = trend;
+        _loadingTrend = false;
+        _insights     = InsightEngine.generate(
+          transactions:  tx.transactions,
+          budgetStatuses: bp.statuses,
+          holdings:      pp.holdings,
+          totalIncome:   tx.totalIncome,
+          totalExpenses: tx.totalExpenses,
+        );
+      });
+    }
   }
 
   @override
@@ -50,13 +66,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       backgroundColor: AppColors.background,
       body: Consumer4<TransactionProvider, BudgetProvider, PortfolioProvider, TagProvider>(
         builder: (_, txp, bp, pp, tagProvider, __) {
-          final insights = InsightEngine.generate(
-            transactions: txp.transactions,
-            budgetStatuses: bp.statuses,
-            holdings: pp.holdings,
-            totalIncome: txp.totalIncome,
-            totalExpenses: txp.totalExpenses,
-          );
           return RefreshIndicator(
             onRefresh: _load,
             color: AppColors.primary,
@@ -215,10 +224,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   ],
 
                   // Insights
-                  if (insights.isNotEmpty) ...[
+                  if (_insights.isNotEmpty) ...[
                     _SectionTitle('Smart Insights', Icons.auto_awesome_rounded),
                     const SizedBox(height: 12),
-                    ...insights.map((insight) {
+                    ..._insights.map((insight) {
                       final color = insight.type == 'warning' ? AppColors.expense
                           : insight.type == 'tip' ? AppColors.primary
                           : AppColors.info;

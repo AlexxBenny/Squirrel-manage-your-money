@@ -260,6 +260,30 @@ class DatabaseHelper {
     return (result.first['total'] as num?)?.toDouble() ?? 0.0;
   }
 
+  /// FIX #8: Single grouped query replacing 24 sequential getTotalByType calls.
+  /// Returns map of 'YYYY-MM' -> {'income': x, 'expense': y}.
+  Future<Map<String, Map<String, double>>> getMonthlyTotals(
+      {required DateTime from}) async {
+    final db = await database;
+    final results = await db.rawQuery(
+      '''
+      SELECT strftime('%Y-%m', date) AS month, type, SUM(amount) AS total
+      FROM transactions
+      WHERE date >= ? AND type IN ('income', 'expense')
+      GROUP BY month, type
+      ''',
+      [from.toIso8601String()],
+    );
+    final map = <String, Map<String, double>>{};
+    for (final row in results) {
+      final month = row['month'] as String;
+      final type  = row['type']  as String;
+      final total = (row['total'] as num).toDouble();
+      map.putIfAbsent(month, () => {})[type] = total;
+    }
+    return map;
+  }
+
   // ─── Budgets ──────────────────────────────────────────────────────────────
 
   Future<int> upsertBudget(Map<String, dynamic> budget) async {
@@ -332,6 +356,20 @@ class DatabaseHelper {
     final db = await database;
     final results = await db.query('price_cache', where: 'ticker = ?', whereArgs: [ticker]);
     return results.isEmpty ? null : results.first;
+  }
+
+  /// FIX #5: Batch-read all cached prices in a single query instead of one
+  /// query per holding (was an N+1 problem).
+  Future<Map<String, Map<String, dynamic>>> getCachedPrices(
+      List<String> tickers) async {
+    if (tickers.isEmpty) return {};
+    final db = await database;
+    final placeholders = List.filled(tickers.length, '?').join(',');
+    final results = await db.rawQuery(
+      'SELECT * FROM price_cache WHERE ticker IN ($placeholders)',
+      tickers,
+    );
+    return {for (final r in results) r['ticker'] as String: Map<String, dynamic>.from(r)};
   }
 
   // ─── Custom Tags ──────────────────────────────────────────────────────────

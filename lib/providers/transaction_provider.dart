@@ -98,18 +98,19 @@ class TransactionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// FIX #8: Single grouped SQL query replaces 24 sequential DB round-trips.
   Future<Map<String, List<double>>> getMonthlyTrend() async {
     final months = DateHelpers.last12Months();
-    final incomeData = <double>[];
+    final from   = DateHelpers.startOfMonth(months.first);
+    // One query returns all months at once, grouped by month+type
+    final raw = await _db.getMonthlyTotals(from: from);
+    final incomeData  = <double>[];
     final expenseData = <double>[];
-
     for (final month in months) {
-      final from = DateHelpers.startOfMonth(month);
-      final to = DateHelpers.endOfMonth(month);
-      final inc = await _db.getTotalByType(type: 'income', from: from, to: to);
-      final exp = await _db.getTotalByType(type: 'expense', from: from, to: to);
-      incomeData.add(inc);
-      expenseData.add(exp);
+      final key  = '${month.year}-${month.month.toString().padLeft(2, '0')}';
+      final data = raw[key] ?? {};
+      incomeData.add(data['income']  ?? 0);
+      expenseData.add(data['expense'] ?? 0);
     }
     return {'income': incomeData, 'expense': expenseData};
   }

@@ -7,6 +7,13 @@ import '../core/database/database_helper.dart';
 import '../core/utils/xirr_calculator.dart';
 import '../models/holding_model.dart';
 
+/// Holds a price update for one holding, keyed by holding ID.
+typedef _PriceUpdate = ({
+  double price,
+  double? changePct,
+  double? currentValueOverride,
+});
+
 class PortfolioProvider extends ChangeNotifier {
   final _db   = DatabaseHelper.instance;
   final _uuid = const Uuid();
@@ -193,41 +200,55 @@ class PortfolioProvider extends ChangeNotifier {
     }
   }
 
+  /// FIX #5: One batch DB query replaces N individual queries (N+1 eliminated).
   Future<void> _applyCachedPrices() async {
-    final updated = <HoldingModel>[];
-    for (final h in _holdings) {
-      if (h.ticker == null) { updated.add(h); continue; }
-      final cached = await _db.getCachedPrice(h.ticker!);
-      if (cached != null) {
-        final age = DateTime.now().difference(DateTime.parse(cached['fetched_at'] as String)).inMinutes;
-        if (age < 60) {
-          updated.add(h.copyWith(
-            currentPrice: (cached['price'] as num).toDouble(),
-            changePct: (cached['change_pct'] as num?)?.toDouble(),
-          ));
-          continue;
-        }
-      }
-      updated.add(h);
-    }
-    _holdings = updated;
+    final tickers = _holdings.where((h) => h.ticker != null).map((h) => h.ticker!).toList();
+    if (tickers.isEmpty) return;
+    final cacheMap = await _db.getCachedPrices(tickers);
+    final now = DateTime.now();
+    _holdings = _holdings.map((h) {
+      if (h.ticker == null) return h;
+      final c = cacheMap[h.ticker!];
+      if (c == null) return h;
+      final ageMin = now.difference(DateTime.parse(c['fetched_at'] as String)).inMinutes;
+      if (ageMin >= 60) return h;
+      return h.copyWith(
+        currentPrice: (c['price'] as num).toDouble(),
+        changePct: (c['change_pct'] as num?)?.toDouble(),
+      );
+    }).toList();
   }
 
   // ── Live Price Fetching ────────────────────────────────────────────────────
 
+  /// FIX #1 + #4: Updates collected into a shared ID-keyed map, applied
+  /// atomically after all fetches complete — no index-based race condition.
   Future<void> fetchLivePrices() async {
+    if (_isFetching) return; // prevent overlapping fetch
     _isFetching = true;
     notifyListeners();
+    final updates = <String, _PriceUpdate>{};
     await Future.wait([
-      _fetchCryptoPrices(),
-      _fetchStockAndEtfPrices(),
-      _fetchMfNavs(),
+      _fetchCryptoPrices(updates),
+      _fetchStockAndEtfPrices(updates),
+      _fetchMfNavs(updates),
     ]);
+    if (updates.isNotEmpty) {
+      _holdings = _holdings.map((h) {
+        final u = updates[h.id];
+        if (u == null) return h;
+        return h.copyWith(
+          currentPrice: u.price,
+          changePct: u.changePct,
+          currentValueOverride: u.currentValueOverride,
+        );
+      }).toList();
+    }
     _isFetching = false;
     notifyListeners();
   }
 
-  Future<void> _fetchCryptoPrices() async {
+  Future<void> _fetchCryptoPrices(Map<String, _PriceUpdate> updates) async {
     final crypto = _holdings.where((h) => h.assetClass == 'crypto' && h.ticker != null).toList();
     if (crypto.isEmpty) return;
     try {
@@ -236,80 +257,64 @@ class PortfolioProvider extends ChangeNotifier {
       final res = await http.get(url).timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
         final data = json.decode(res.body) as Map<String, dynamic>;
-        for (int i = 0; i < _holdings.length; i++) {
-          final h = _holdings[i];
-          if (h.assetClass != 'crypto') continue;
+        for (final h in crypto) {
           final coinId = (h.meta['coin_id'] as String? ?? h.ticker ?? '').toLowerCase();
           final pd = data[coinId] as Map<String, dynamic>?;
           if (pd != null) {
             final price = (pd['inr'] as num).toDouble();
             final chg   = (pd['inr_24h_change'] as num?)?.toDouble();
             await _db.upsertPrice(h.ticker!, price, chg);
-            _holdings[i] = h.copyWith(currentPrice: price, changePct: chg);
+            updates[h.id] = (price: price, changePct: chg, currentValueOverride: null);
           }
         }
       }
     } catch (_) {}
   }
 
-  Future<void> _fetchStockAndEtfPrices() async {
-    final tickers = _holdings.where((h) =>
+  /// FIX #6: All stock requests now run in parallel instead of sequentially.
+  Future<void> _fetchStockAndEtfPrices(Map<String, _PriceUpdate> updates) async {
+    final holdings = _holdings.where((h) =>
         (h.assetClass == 'stock' || (h.assetClass == 'gold' && h.goldType == 'etf'))
         && h.ticker != null).toList();
-    for (final h in tickers) {
-      try {
-        final sym = h.exchange == 'BSE' ? '${h.ticker}.BO' : '${h.ticker}.NS';
-        final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$sym?interval=1d&range=1d');
-        final res = await http.get(url, headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 10));
-        if (res.statusCode == 200) {
-          final data  = json.decode(res.body) as Map<String, dynamic>;
-          final result = (data['chart']?['result'] as List?)?.firstOrNull as Map<String, dynamic>?;
-          if (result != null) {
-            final meta  = result['meta'] as Map<String, dynamic>;
-            final price = (meta['regularMarketPrice'] as num).toDouble();
-            final prev  = (meta['chartPreviousClose'] as num?)?.toDouble();
-            final chg   = prev != null ? (price - prev) / prev * 100 : null;
-            await _db.upsertPrice(h.ticker!, price, chg);
-            final idx = _holdings.indexWhere((x) => x.id == h.id);
-            if (idx != -1) _holdings[idx] = h.copyWith(currentPrice: price, changePct: chg);
-          }
-        }
-      } catch (_) {}
-    }
+    if (holdings.isEmpty) return;
+    await Future.wait(holdings.map((h) => _fetchOneStock(h, updates)));
   }
 
-  Future<void> _fetchMfNavs() async {
+  Future<void> _fetchOneStock(HoldingModel h, Map<String, _PriceUpdate> updates) async {
+    try {
+      final sym = h.exchange == 'BSE' ? '${h.ticker}.BO' : '${h.ticker}.NS';
+      final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$sym?interval=1d&range=1d');
+      final res = await http.get(url, headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final data   = json.decode(res.body) as Map<String, dynamic>;
+        final result = (data['chart']?['result'] as List?)?.firstOrNull as Map<String, dynamic>?;
+        if (result != null) {
+          final meta  = result['meta'] as Map<String, dynamic>;
+          final price = (meta['regularMarketPrice'] as num).toDouble();
+          final prev  = (meta['chartPreviousClose'] as num?)?.toDouble();
+          final chg   = prev != null ? (price - prev) / prev * 100 : null;
+          await _db.upsertPrice(h.ticker!, price, chg);
+          updates[h.id] = (price: price, changePct: chg, currentValueOverride: null);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchMfNavs(Map<String, _PriceUpdate> updates) async {
     final mfs = _holdings.where((h) => h.assetClass == 'mutual_fund' && h.mfSchemeCode != null).toList();
     for (final h in mfs) {
       try {
         final url = Uri.parse('https://api.mfapi.in/mf/${h.mfSchemeCode}/latest');
         final res = await http.get(url).timeout(const Duration(seconds: 10));
         if (res.statusCode == 200) {
-          final data = json.decode(res.body) as Map<String, dynamic>;
+          final data   = json.decode(res.body) as Map<String, dynamic>;
           final navStr = (data['data'] as List?)?.firstOrNull?['nav'] as String?;
           if (navStr != null) {
             final nav = double.tryParse(navStr);
             if (nav != null) {
-              final idx = _holdings.indexWhere((x) => x.id == h.id);
-              if (idx != -1) {
-                final updatedMeta = Map<String, dynamic>.from(_holdings[idx].meta);
-                updatedMeta['current_nav'] = nav;
-                // Update current value override based on units × nav
-                final units = (updatedMeta['units'] as num?)?.toDouble();
-                final cv = units != null ? units * nav : null;
-                _holdings[idx] = HoldingModel(
-                  id: h.id, name: h.name, assetClass: h.assetClass,
-                  investedAmount: h.investedAmount,
-                  currentValueOverride: cv,
-                  ticker: h.ticker, exchange: h.exchange,
-                  quantity: h.quantity, avgBuyPrice: h.avgBuyPrice,
-                  sipDay: h.sipDay, maturityDate: h.maturityDate,
-                  alertEnabled: h.alertEnabled,
-                  meta: updatedMeta,
-                  currentPrice: nav,
-                  createdAt: h.createdAt, notes: h.notes,
-                );
-              }
+              final units = (h.meta['units'] as num?)?.toDouble();
+              final cv    = units != null ? units * nav : null;
+              updates[h.id] = (price: nav, changePct: null, currentValueOverride: cv);
             }
           }
         }
@@ -319,14 +324,21 @@ class PortfolioProvider extends ChangeNotifier {
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
 
+  /// FIX #4: Optimistic local update avoids calling loadHoldings() which
+  /// would race with any in-flight fetchLivePrices() operation.
   Future<void> addHolding(HoldingModel holding) async {
     await _db.insertHolding(holding.toMap());
-    await loadHoldings();
+    _holdings = [..._holdings, holding]..sort((a, b) => a.name.compareTo(b.name));
+    notifyListeners();
   }
 
   Future<void> updateHolding(HoldingModel holding) async {
     await _db.updateHolding(holding.toMap());
-    await loadHoldings();
+    final idx = _holdings.indexWhere((h) => h.id == holding.id);
+    if (idx != -1) {
+      _holdings = List.of(_holdings)..[idx] = holding;
+    }
+    notifyListeners();
   }
 
   Future<void> deleteHolding(String id) async {

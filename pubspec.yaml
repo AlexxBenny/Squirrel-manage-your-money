@@ -33,10 +33,6 @@ dependencies:
   uuid: ^4.5.1
   shared_preferences: ^2.3.3
 
-  # Notifications
-  flutter_local_notifications: ^18.0.1
-  timezone: ^0.9.4
-
   # File system & export
   path_provider: ^2.1.5
   share_plus: ^10.1.4

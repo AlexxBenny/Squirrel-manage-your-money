@@ -38,13 +38,16 @@ class _NavChartSheetState extends State<NavChartSheet> {
   Future<void> _fetchHistory() async {
     final code = widget.holding.mfSchemeCode;
     if (code == null || code.isEmpty) {
+      if (!mounted) return;
       setState(() { _error = 'No scheme code — cannot fetch NAV history.\nAdd the scheme code when editing this fund.'; _loading = false; });
       return;
     }
+    if (!mounted) return;
     setState(() { _loading = true; _error = ''; });
     try {
       final url = Uri.parse('https://api.mfapi.in/mf/$code');
       final res = await http.get(url).timeout(const Duration(seconds: 15));
+      if (!mounted) return; // guard after every await
       if (res.statusCode == 200) {
         final body = json.decode(res.body) as Map<String, dynamic>;
         final rawData = body['data'] as List?;
@@ -68,6 +71,7 @@ class _NavChartSheetState extends State<NavChartSheet> {
         setState(() { _error = 'Failed to load data (${res.statusCode})'; _loading = false; });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() { _error = 'No connection. Try again later.'; _loading = false; });
     }
   }

@@ -75,7 +75,7 @@ class _AppShellState extends State<_AppShell> {
       ),
       child: Scaffold(
         backgroundColor: AppColors.background,
-        body: IndexedStack(index: _currentIndex, children: _screens),
+        body: _LazyIndexedStack(index: _currentIndex, children: _screens),
         floatingActionButton: AnimatedScale(
           scale: showFab ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 220),
@@ -174,6 +174,51 @@ class _NavTile extends StatelessWidget {
           fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
         )),
       ]),
+    );
+  }
+}
+
+// ── Lazy indexed stack ────────────────────────────────────────────────────────
+/// Builds each child only on its first visit, then keeps it alive using
+/// Offstage so state is preserved without eagerly constructing all screens.
+class _LazyIndexedStack extends StatefulWidget {
+  final int index;
+  final List<Widget> children;
+  const _LazyIndexedStack({required this.index, required this.children});
+  @override
+  State<_LazyIndexedStack> createState() => _LazyIndexedStackState();
+}
+
+class _LazyIndexedStackState extends State<_LazyIndexedStack> {
+  // Tracks which tab indices have ever been shown
+  late final Set<int> _activated;
+
+  @override
+  void initState() {
+    super.initState();
+    _activated = {widget.index}; // only the initial tab is built at startup
+  }
+
+  @override
+  void didUpdateWidget(_LazyIndexedStack old) {
+    super.didUpdateWidget(old);
+    _activated.add(widget.index); // mark new tab as built on first visit
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: List.generate(widget.children.length, (i) {
+        if (!_activated.contains(i)) return const SizedBox.shrink();
+        return Offstage(
+          offstage: i != widget.index,
+          child: TickerMode(
+            enabled: i == widget.index,
+            child: widget.children[i],
+          ),
+        );
+      }),
     );
   }
 }
