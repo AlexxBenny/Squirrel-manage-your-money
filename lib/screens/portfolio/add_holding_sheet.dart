@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/categories.dart';
+import '../../models/holding_model.dart';
 import '../../providers/portfolio_provider.dart';
 import 'holding_forms/mf_form.dart';
 import 'holding_forms/stock_form.dart';
@@ -14,21 +15,23 @@ import 'holding_forms/real_estate_form.dart';
 import 'holding_forms/other_form.dart';
 
 class AddHoldingSheet extends StatefulWidget {
-  const AddHoldingSheet({super.key});
+  final HoldingModel? existing;
+  const AddHoldingSheet({super.key, this.existing});
 
-  static Future<void> show(BuildContext context) => showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (_) => const AddHoldingSheet(),
-  );
+  static Future<void> show(BuildContext context, {HoldingModel? existing}) =>
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AddHoldingSheet(existing: existing),
+    );
 
   @override
   State<AddHoldingSheet> createState() => _AddHoldingSheetState();
 }
 
 class _AddHoldingSheetState extends State<AddHoldingSheet> {
-  String _assetClass = 'mutual_fund';
+  late String _assetClass;
   bool _isSaving = false;
 
   // Form keys — one per asset type
@@ -40,10 +43,25 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
   final _reKey   = GlobalKey<RealEstateFormState>();
   final _otKey   = GlobalKey<OtherFormState>();
 
+  bool get _isEditing => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _assetClass = widget.existing?.assetClass ?? 'mutual_fund';
+    if (_isEditing) {
+      // Pre-fill after first frame so form keys are mounted
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final h = widget.existing!;
+        if (h.assetClass == 'mutual_fund') _mfKey.currentState?.loadFrom(h);
+      });
+    }
+  }
+
   Future<void> _save() async {
     setState(() => _isSaving = true);
     try {
-      final id = const Uuid().v4();
+      final id = _isEditing ? widget.existing!.id : const Uuid().v4();
       final holding = switch (_assetClass) {
         'mutual_fund'  => _mfKey.currentState?.buildHolding(id),
         'stock'        => _stKey.currentState?.buildHolding(id),
@@ -55,7 +73,11 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
         _              => null,
       };
       if (holding == null) return;
-      await context.read<PortfolioProvider>().addHolding(holding);
+      if (_isEditing) {
+        await context.read<PortfolioProvider>().updateHolding(holding);
+      } else {
+        await context.read<PortfolioProvider>().addHolding(holding);
+      }
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -82,8 +104,9 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(children: [
-            Text('Add Investment', style: GoogleFonts.inter(
-              color: AppColors.text1, fontSize: 20, fontWeight: FontWeight.w800)),
+            Text(_isEditing ? 'Edit Investment' : 'Add Investment',
+              style: GoogleFonts.inter(
+                color: AppColors.text1, fontSize: 20, fontWeight: FontWeight.w800)),
             const Spacer(),
             TextButton(onPressed: () => Navigator.pop(context),
               child: const Text('Cancel', style: TextStyle(color: AppColors.text3))),
@@ -93,7 +116,7 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
         // Asset class selector
         SizedBox(height: 100, child: _AssetClassPicker(
           selected: _assetClass,
-          onChanged: (v) => setState(() => _assetClass = v),
+          onChanged: _isEditing ? null : (v) => setState(() => _assetClass = v),
         )),
         const Divider(height: 1),
         // Form body
@@ -122,7 +145,7 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
             ),
             child: _isSaving
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Text('Save ${AssetClasses.nameFor(_assetClass)}',
+                : Text(_isEditing ? 'Update ${AssetClasses.nameFor(_assetClass)}' : 'Save ${AssetClasses.nameFor(_assetClass)}',
                     style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 15)),
           )),
         ),
@@ -133,7 +156,7 @@ class _AddHoldingSheetState extends State<AddHoldingSheet> {
 
 class _AssetClassPicker extends StatelessWidget {
   final String selected;
-  final ValueChanged<String> onChanged;
+  final ValueChanged<String>? onChanged;  // null = locked (edit mode)
   const _AssetClassPicker({required this.selected, required this.onChanged});
 
   @override
@@ -149,24 +172,29 @@ class _AssetClassPicker extends StatelessWidget {
         final color = Color(ac['color'] as int);
         final sel = selected == id;
         return GestureDetector(
-          onTap: () => onChanged(id),
+          onTap: onChanged != null ? () => onChanged!(id) : null,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             width: 82,
             decoration: BoxDecoration(
               color: sel ? color.withValues(alpha: 0.12) : AppColors.surface,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: sel ? color : AppColors.border, width: sel ? 2 : 1),
+              border: Border.all(
+                color: sel ? color : (onChanged == null ? AppColors.border.withValues(alpha: 0.4) : AppColors.border),
+                width: sel ? 2 : 1),
             ),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(ac['emoji'] as String, style: const TextStyle(fontSize: 26)),
-              const SizedBox(height: 4),
-              Text(ac['name'] as String,
-                style: GoogleFonts.inter(
-                  color: sel ? color : AppColors.text2,
-                  fontSize: 10, fontWeight: FontWeight.w700),
-                textAlign: TextAlign.center, maxLines: 2),
-            ]),
+            child: Opacity(
+              opacity: onChanged == null && !sel ? 0.35 : 1.0,
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(ac['emoji'] as String, style: const TextStyle(fontSize: 26)),
+                const SizedBox(height: 4),
+                Text(ac['name'] as String,
+                  style: GoogleFonts.inter(
+                    color: sel ? color : AppColors.text2,
+                    fontSize: 10, fontWeight: FontWeight.w700),
+                  textAlign: TextAlign.center, maxLines: 2),
+              ]),
+            ),
           ),
         );
       },

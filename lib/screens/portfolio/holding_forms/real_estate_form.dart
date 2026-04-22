@@ -189,7 +189,7 @@ class RealEstateFormState extends State<RealEstateForm> {
       formSection('Home Loan (Optional)'),
       Row(children: [
         Switch(value: _hasLoan, onChanged: (v) => setState(() => _hasLoan = v),
-          activeColor: const Color(0xFF9B59B6)),
+          activeThumbColor: const Color(0xFF9B59B6)),
         Text('Has Home Loan', style: GoogleFonts.inter(color: const Color(0xFF0F172A), fontSize: 13)),
       ]),
       if (_hasLoan) ...[

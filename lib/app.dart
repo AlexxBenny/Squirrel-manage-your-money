@@ -10,12 +10,14 @@ import 'providers/portfolio_provider.dart';
 import 'providers/tag_provider.dart';
 import 'providers/category_provider.dart';
 import 'providers/goal_provider.dart';
+import 'providers/lend_provider.dart';
 import 'screens/dashboard/dashboard_screen.dart';
 import 'screens/transactions/transactions_screen.dart';
 import 'screens/budget/budget_screen.dart';
 import 'screens/portfolio/portfolio_screen.dart';
 import 'screens/analytics/analytics_screen.dart';
 import 'screens/goals/goals_screen.dart';
+import 'screens/lendings/lend_screen.dart';
 import 'screens/transactions/add_transaction_sheet.dart';
 
 class FinanceApp extends StatelessWidget {
@@ -31,6 +33,7 @@ class FinanceApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TagProvider()),
         ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => GoalProvider()),
+        ChangeNotifierProvider(create: (_) => LendProvider()),
       ],
       child: MaterialApp(
         title: 'Squirrel',
@@ -52,7 +55,7 @@ class _AppShellState extends State<_AppShell> {
   int _currentIndex = 0;
 
   // FAB only on Home + Txns — all other tabs have their own actions or none
-  static const _noFabIndices = {2, 3, 4, 5};
+  static const _noFabIndices = {2, 3, 4, 5, 6};
 
   final _screens = const [
     DashboardScreen(),
@@ -61,6 +64,7 @@ class _AppShellState extends State<_AppShell> {
     PortfolioScreen(),
     GoalsScreen(),
     AnalyticsScreen(),
+    LendScreen(),
   ];
 
   @override
@@ -111,6 +115,7 @@ class _BottomBar extends StatelessWidget {
     _NavDef(icon: Icons.show_chart_outlined,   activeIcon: Icons.show_chart_rounded,    label: 'Portfolio'),
     _NavDef(icon: Icons.flag_outlined,         activeIcon: Icons.flag_rounded,          label: 'Goals'),
     _NavDef(icon: Icons.bar_chart_outlined,    activeIcon: Icons.bar_chart_rounded,     label: 'Analytics'),
+    _NavDef(icon: Icons.handshake_outlined,    activeIcon: Icons.handshake_rounded,     label: 'Lendings'),
   ];
 
   @override
@@ -131,6 +136,7 @@ class _BottomBar extends StatelessWidget {
             Expanded(child: _NavTile(index: 3, def: _items[3], currentIndex: currentIndex, onTap: onTap)),
             Expanded(child: _NavTile(index: 4, def: _items[4], currentIndex: currentIndex, onTap: onTap)),
             Expanded(child: _NavTile(index: 5, def: _items[5], currentIndex: currentIndex, onTap: onTap)),
+            Expanded(child: _NavTile(index: 6, def: _items[6], currentIndex: currentIndex, onTap: onTap)),
           ]),
         ),
       ),

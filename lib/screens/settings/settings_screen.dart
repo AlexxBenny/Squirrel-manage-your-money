@@ -171,10 +171,14 @@ class SettingsScreen extends StatelessWidget {
     ));
 
     if (ok == true && context.mounted) {
+      // Capture providers BEFORE the first await — fixes use_build_context_synchronously
+      final txP  = context.read<TransactionProvider>();
+      final budP = context.read<BudgetProvider>();
+      final pfP  = context.read<PortfolioProvider>();
       await DatabaseHelper.instance.clearAllData();
-      await context.read<TransactionProvider>().loadTransactions();
-      await context.read<BudgetProvider>().loadBudgets();
-      await context.read<PortfolioProvider>().loadHoldings();
+      await txP.loadTransactions();
+      await budP.loadBudgets();
+      await pfP.loadHoldings();
       if (context.mounted) _snack(context, '✓ All data cleared');
     }
   }

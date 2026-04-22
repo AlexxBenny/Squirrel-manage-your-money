@@ -101,6 +101,12 @@ class HoldingModel {
     final s = meta['sip_start'] as String?;
     return s != null ? DateTime.tryParse(s) : null;
   }
+  /// Ordered list of SIP amount changes: [{date, amount, note}]
+  List<Map<String, dynamic>> get mfSipHistory {
+    final raw = meta['sip_history'];
+    if (raw is! List) return [];
+    return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
 
   // Fixed Deposit
   String? get fdBank          => meta['bank_name'] as String?;

@@ -32,6 +32,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Unique app ID for debug builds so they coexist with the release build.
+            // This prevents Android from uninstalling the release app (and wiping its data)
+            // when you run `flutter run` during development.
+            applicationIdSuffix = ".debug"
+        }
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.

@@ -17,7 +17,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'finance_os.db');
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -129,6 +129,21 @@ class DatabaseHelper {
       )
     ''');
 
+    await db.execute('''
+      CREATE TABLE lendings (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        person_name TEXT NOT NULL,
+        amount REAL NOT NULL,
+        currency TEXT DEFAULT 'INR',
+        date TEXT NOT NULL,
+        due_date TEXT,
+        note TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL
+      )
+    ''');
+
     // Indexes for performance
     await db.execute('CREATE INDEX idx_tx_date ON transactions(date)');
     await db.execute('CREATE INDEX idx_tx_category ON transactions(category)');
@@ -182,6 +197,22 @@ class DatabaseHelper {
           target_date TEXT,
           linked_holding_ids TEXT,
           notes TEXT,
+          created_at TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 6) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS lendings (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          person_name TEXT NOT NULL,
+          amount REAL NOT NULL,
+          currency TEXT DEFAULT 'INR',
+          date TEXT NOT NULL,
+          due_date TEXT,
+          note TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
           created_at TEXT NOT NULL
         )
       ''');
@@ -475,5 +506,27 @@ class DatabaseHelper {
   Future<void> deleteGoal(String id) async {
     final db = await database;
     await db.delete('goals', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ─── Lendings ─────────────────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> getLendings() async {
+    final db = await database;
+    return await db.query('lendings', orderBy: 'date DESC');
+  }
+
+  Future<void> insertLending(Map<String, dynamic> lending) async {
+    final db = await database;
+    await db.insert('lendings', lending, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> updateLending(Map<String, dynamic> lending) async {
+    final db = await database;
+    await db.update('lendings', lending, where: 'id = ?', whereArgs: [lending['id']]);
+  }
+
+  Future<void> deleteLending(String id) async {
+    final db = await database;
+    await db.delete('lendings', where: 'id = ?', whereArgs: [id]);
   }
 }

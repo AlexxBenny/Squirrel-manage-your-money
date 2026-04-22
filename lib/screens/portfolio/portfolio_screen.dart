@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -284,9 +285,9 @@ class _PortfolioScreenState extends State<PortfolioScreen>
 String _compact(double v) {
   final abs = v.abs();
   final sign = v < 0 ? '-' : '';
-  if (abs >= 1e7) return '${sign}${(abs / 1e7).toStringAsFixed(1)}Cr';
-  if (abs >= 1e5) return '${sign}${(abs / 1e5).toStringAsFixed(1)}L';
-  if (abs >= 1e3) return '${sign}${(abs / 1e3).toStringAsFixed(1)}K';
+  if (abs >= 1e7) return '$sign${(abs / 1e7).toStringAsFixed(1)}Cr';
+  if (abs >= 1e5) return '$sign${(abs / 1e5).toStringAsFixed(1)}L';
+  if (abs >= 1e3) return '$sign${(abs / 1e3).toStringAsFixed(1)}K';
   return '$sign${abs.toStringAsFixed(0)}';
 }
 
@@ -386,20 +387,28 @@ class _HoldingCardState extends State<_HoldingCard> {
                 ]),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Text(_subtitle(h), style: GoogleFonts.inter(color: AppColors.text3, fontSize: 11),
-                    overflow: TextOverflow.ellipsis),
-                  const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: (isProfit ? AppColors.income : AppColors.expense).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20)),
-                    child: Text(
-                      '${isProfit ? '+' : ''}${CurrencyFormatter.format(h.profitLoss, compact: true)} '
-                      '(${h.profitLossPct.toStringAsFixed(1)}%)',
-                      style: GoogleFonts.inter(
-                        color: isProfit ? AppColors.income : AppColors.expense,
-                        fontSize: 11, fontWeight: FontWeight.w700)),
+                  Flexible(
+                    child: Text(_subtitle(h),
+                      style: GoogleFonts.inter(color: AppColors.text3, fontSize: 11),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1),
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: (isProfit ? AppColors.income : AppColors.expense).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20)),
+                      child: Text(
+                        '${isProfit ? '+' : ''}${CurrencyFormatter.format(h.profitLoss, compact: true)} '
+                        '(${h.profitLossPct.toStringAsFixed(1)}%)',
+                        style: GoogleFonts.inter(
+                          color: isProfit ? AppColors.income : AppColors.expense,
+                          fontSize: 11, fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1),
+                    ),
                   ),
                 ]),
               ])),
@@ -425,9 +434,45 @@ class _HoldingCardState extends State<_HoldingCard> {
                   icon: const Icon(Icons.show_chart_rounded, size: 16, color: AppColors.primary),
                   label: Text('NAV Chart', style: GoogleFonts.inter(color: AppColors.primary, fontSize: 12)),
                 ),
+              TextButton.icon(
+                onPressed: () => AddHoldingSheet.show(context, existing: h),
+                icon: const Icon(Icons.edit_rounded, size: 16, color: AppColors.text2),
+                label: Text('Edit', style: GoogleFonts.inter(color: AppColors.text2, fontSize: 12)),
+              ),
               const Spacer(),
               TextButton.icon(
-                onPressed: () => widget.provider.deleteHolding(h.id),
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => AlertDialog(
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      title: Row(children: [
+                        const Icon(Icons.warning_amber_rounded, color: AppColors.expense, size: 22),
+                        const SizedBox(width: 8),
+                        Text('Remove Holding?', style: GoogleFonts.inter(
+                          fontSize: 16, fontWeight: FontWeight.w800)),
+                      ]),
+                      content: Text(
+                        'This will permanently remove "${h.name}" from your portfolio.\n\nThis cannot be undone.',
+                        style: GoogleFonts.inter(color: AppColors.text2, fontSize: 13)),
+                      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: Text('Cancel', style: GoogleFonts.inter(
+                            color: AppColors.text2, fontWeight: FontWeight.w600))),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.expense,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: Text('Remove', style: GoogleFonts.inter(
+                            color: Colors.white, fontWeight: FontWeight.w700))),
+                      ],
+                    ),
+                  );
+                  if (ok == true) widget.provider.deleteHolding(h.id);
+                },
                 icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.expense),
                 label: Text('Remove', style: GoogleFonts.inter(color: AppColors.expense, fontSize: 12)),
               ),
@@ -471,12 +516,24 @@ class _HoldingCardState extends State<_HoldingCard> {
     switch (h.assetClass) {
       case 'mutual_fund':
         if (h.mfUnits != null) rows.add(_DetailRow('Units', h.mfUnits!.toStringAsFixed(3)));
-        if (h.avgBuyPrice != null) rows.add(_DetailRow('Avg NAV', '₹${h.avgBuyPrice!.toStringAsFixed(2)}'));
-        if (h.mfCurrentNav != null) rows.add(_DetailRow('Current NAV', '₹${h.mfCurrentNav!.toStringAsFixed(2)}'));
-        if (h.mfType == 'sip' && h.sipDay != null)
+        if (h.mfCurrentNav != null) rows.add(_DetailRow('Current NAV', '₹${h.mfCurrentNav!.toStringAsFixed(4)}'));
+        // avg NAV is stored in meta
+        final avgNav = (h.meta['avg_nav'] as num?)?.toDouble();
+        if (avgNav != null) rows.add(_DetailRow('Avg Buy NAV', '₹${avgNav.toStringAsFixed(4)}'));
+        // category label
+        final catLabel = _mfCatLabel(h.mfCategory ?? '');
+        if (catLabel.isNotEmpty) rows.add(_DetailRow('Category', catLabel));
+        if (h.mfPlan != null) rows.add(_DetailRow('Plan', h.mfPlan == 'direct' ? 'Direct ✓' : 'Regular'));
+        if (h.mfType != null) rows.add(_DetailRow('Type', h.mfType == 'sip' ? 'SIP' : 'Lump Sum'));
+        if (h.mfType == 'sip' && h.sipDay != null) {
           rows.add(_DetailRow('SIP Day', 'Every ${h.sipDay}th'));
+        }
+        if (h.mfType == 'sip' && h.mfSipAmount != null) {
+          rows.add(_DetailRow('SIP Amount', '₹${h.mfSipAmount!.toStringAsFixed(0)}/mo'));
+        }
         if (h.mfIsELSS) rows.add(_DetailRow('Tax Benefit', 'ELSS (₹1.5L under 80C)'));
         if (h.mfFolio?.isNotEmpty == true) rows.add(_DetailRow('Folio', h.mfFolio!));
+        if (h.mfSchemeCode?.isNotEmpty == true) rows.add(_DetailRow('Scheme Code', h.mfSchemeCode!));
       case 'stock':
         if (h.quantity != null) rows.add(_DetailRow('Shares', h.quantity!.toStringAsFixed(0)));
         if (h.avgBuyPrice != null) rows.add(_DetailRow('Avg Price', '₹${h.avgBuyPrice!.toStringAsFixed(2)}'));
@@ -496,19 +553,22 @@ class _HoldingCardState extends State<_HoldingCard> {
         if (h.fdType != null) rows.add(_DetailRow('Type', h.fdType!.replaceAll('_', ' ').toUpperCase()));
       case 'real_estate':
         if (h.reTotalCost != null) rows.add(_DetailRow('Total Cost', '₹${_compact(h.reTotalCost!)}'));
-        if (h.reRentalIncome != null && h.reRentalIncome! > 0)
+        if (h.reRentalIncome != null && h.reRentalIncome! > 0) {
           rows.add(_DetailRow('Monthly Rent', '₹${h.reRentalIncome!.toStringAsFixed(0)}'));
-        if (h.reHasLoan && h.reEmi != null) rows.add(_DetailRow('EMI', '₹${h.reEmi!.toStringAsFixed(0)}/mo'));
-        if (h.reRemainingMonths != null) rows.add(_DetailRow('Loan Balance', '${h.reRemainingMonths} months left'));
+        }
+        if (h.reHasLoan && h.reEmi != null) { rows.add(_DetailRow('EMI', '₹${h.reEmi!.toStringAsFixed(0)}/mo')); }
+        if (h.reRemainingMonths != null) { rows.add(_DetailRow('Loan Balance', '${h.reRemainingMonths} months left')); }
       default:
         if (h.otherBalance != null) rows.add(_DetailRow('Corpus', '₹${_compact(h.otherBalance!)}'));
-        if ((h.meta['interest_rate'] as num?) != null)
+        if ((h.meta['interest_rate'] as num?) != null) {
           rows.add(_DetailRow('Rate', '${h.meta['interest_rate']}% p.a.'));
-        if (h.maturityDate != null)
+        }
+        if (h.maturityDate != null) {
           rows.add(_DetailRow('Matures', '${h.maturityDate!.day}/${h.maturityDate!.month}/${h.maturityDate!.year}'));
+        }
     }
 
-    return Wrap(spacing: 8, runSpacing: 8, children: rows.map((r) =>
+    final chips = Wrap(spacing: 8, runSpacing: 8, children: rows.map((r) =>
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
@@ -520,6 +580,256 @@ class _HoldingCardState extends State<_HoldingCard> {
             color: r.color ?? AppColors.text1, fontSize: 12, fontWeight: FontWeight.w700)),
         ]),
       )).toList());
+
+    if (h.assetClass != 'mutual_fund') return chips;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      chips,
+      _buildMfReturns(h, color),
+      _buildMfProjections(h, color),
+    ]);
+  }
+
+  // ── MF Category label map ─────────────────────────────────────────────────
+  static String _mfCatLabel(String key) => const {
+    'equity_large_cap': '🏦 Large Cap', 'equity_mid_cap': '📈 Mid Cap',
+    'equity_small_cap': '🚀 Small Cap', 'equity_multi_cap': '🔀 Multi Cap',
+    'equity_flexi': '🔄 Flexi Cap', 'equity_large_mid': '📊 Large & Mid Cap',
+    'equity_sectoral': '🏭 Sectoral / Thematic', 'equity_value': '💎 Value / Contra',
+    'equity_focused': '🎯 Focused Fund', 'elss': '🧾 ELSS (Tax Saver)',
+    'hybrid': '⚖️ Hybrid', 'hybrid_balanced_advantage': '🔁 Balanced Advantage',
+    'hybrid_equity_savings': '💰 Equity Savings', 'hybrid_arbitrage': '⚡ Arbitrage',
+    'hybrid_multi_asset': '🌐 Multi-Asset', 'hybrid_conservative': '🛡️ Conservative Hybrid',
+    'debt_liquid': '💧 Liquid / Overnight', 'debt_short': '⏱️ Short Duration',
+    'debt_medium': '📅 Medium Duration', 'debt_long': '🗓️ Long Duration',
+    'debt_dynamic': '📉 Dynamic Bond', 'debt_corporate_bond': '🏢 Corporate Bond',
+    'debt_credit_risk': '⚠️ Credit Risk', 'debt_banking_psu': '🏛️ Banking & PSU',
+    'debt_gilt': '🇮🇳 Gilt', 'commodity_gold_etf': '🥇 Gold ETF',
+    'commodity_gold_fof': '🥇 Gold Fund of Fund', 'commodity_silver_etf': '🥈 Silver ETF',
+    'commodity_silver_fof': '🥈 Silver Fund of Fund',
+    'international_fof': '🌍 International FoF', 'fof': '🗂️ Fund of Funds',
+    'index': '📋 Index Fund',
+  }[key] ?? '';
+
+  // ── MF Returns section (premium) ─────────────────────────────────────────
+  Widget _buildMfReturns(HoldingModel h, Color color) {
+    final invested = h.investedAmount;
+    if (invested <= 0) return const SizedBox.shrink();
+    final absReturn   = h.profitLoss;
+    final absReturnPct = h.profitLossPct;
+    final returnColor = h.isProfit ? AppColors.income : AppColors.expense;
+
+    final start = h.mfSipStart ?? h.createdAt;
+    final days  = DateTime.now().difference(start).inDays;
+    final years = days / 365.25;
+
+    double? cagr;
+    String cagrLabel = 'CAGR';
+    if (years >= 0.25 && invested > 0 && h.currentValue > 0) {
+      final raw = pow(h.currentValue / invested, 1.0 / years) - 1;
+      if (!raw.isNaN && !raw.isInfinite && raw.abs() <= 5) {
+        cagr = raw * 100;
+        if (years < 1) cagrLabel = 'Annualised';
+      }
+    }
+
+    String dur;
+    if (days == 0)       { dur = 'Today'; }
+    else if (days < 30)  { dur = '${days}d'; }
+    else if (days < 365) { dur = '${(days / 30).floor()}mo'; }
+    else                 { dur = '${years.floor()}yr ${((days % 365) / 30).floor()}mo'; }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [returnColor.withValues(alpha: 0.10), returnColor.withValues(alpha: 0.03)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: returnColor.withValues(alpha: 0.22))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(h.isProfit ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+            color: returnColor, size: 15),
+          const SizedBox(width: 6),
+          Text('Returns Overview', style: GoogleFonts.inter(
+            color: AppColors.text1, fontSize: 12, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 12),
+        IntrinsicHeight(child: Row(children: [
+          // Absolute return — left block
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Absolute Return', style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+            const SizedBox(height: 3),
+            Text('${absReturnPct >= 0 ? '+' : ''}${absReturnPct.toStringAsFixed(2)}%',
+              style: GoogleFonts.inter(color: returnColor, fontSize: 24, fontWeight: FontWeight.w900)),
+            Text('${absReturn >= 0 ? '+' : '−'}₹${_compactVal(absReturn.abs())}',
+              style: GoogleFonts.inter(color: returnColor.withValues(alpha: 0.75), fontSize: 11, fontWeight: FontWeight.w600)),
+          ]),
+          const SizedBox(width: 14),
+          VerticalDivider(color: returnColor.withValues(alpha: 0.25), thickness: 1),
+          const SizedBox(width: 14),
+          // CAGR or duration — right block
+          if (cagr != null)
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(cagrLabel, style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+              const SizedBox(height: 3),
+              Text('${cagr >= 0 ? '+' : ''}${cagr.toStringAsFixed(2)}%',
+                style: GoogleFonts.inter(
+                  color: cagr >= 0 ? AppColors.income : AppColors.expense,
+                  fontSize: 20, fontWeight: FontWeight.w900)),
+              Text('per annum', style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+            ])
+          else
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Held For', style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+              const SizedBox(height: 3),
+              Text(dur, style: GoogleFonts.inter(color: AppColors.text1, fontSize: 18, fontWeight: FontWeight.w800)),
+              Text('CAGR needs ≥ 3 months', style: GoogleFonts.inter(color: AppColors.text3, fontSize: 9)),
+            ]),
+          if (cagr != null) ...[
+            const SizedBox(width: 14),
+            VerticalDivider(color: returnColor.withValues(alpha: 0.25), thickness: 1),
+            const SizedBox(width: 14),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Held For', style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+              const SizedBox(height: 3),
+              Text(dur, style: GoogleFonts.inter(color: AppColors.text1, fontSize: 16, fontWeight: FontWeight.w700)),
+            ]),
+          ],
+        ])),
+        if (years < 1 && cagr != null)
+          Padding(padding: const EdgeInsets.only(top: 6),
+            child: Text('*Annualised from < 1yr — not a true CAGR',
+              style: GoogleFonts.inter(color: returnColor.withValues(alpha: 0.6), fontSize: 9))),
+      ]),
+    );
+  }
+
+  // ── MF Projections section (always visible) ───────────────────────────────
+  Widget _buildMfProjections(HoldingModel h, Color color) {
+    final invested = h.investedAmount;
+    final base = h.currentValue > 0 ? h.currentValue : invested;
+    if (base <= 0) return const SizedBox.shrink();
+
+    final start = h.mfSipStart ?? h.createdAt;
+    final years = DateTime.now().difference(start).inDays / 365.25;
+
+    // Use actual CAGR if ≥ 3 months of data, else category average
+    double rate;
+    bool isAssumed;
+    if (years >= 0.25 && invested > 0 && base > 0) {
+      final raw = pow(base / invested, 1.0 / years) - 1;
+      if (!raw.isNaN && !raw.isInfinite && raw.abs() <= 5) {
+        rate = raw.toDouble();
+        isAssumed = false;
+      } else {
+        rate = _assumedRate(h.mfCategory);
+        isAssumed = true;
+      }
+    } else {
+      rate = _assumedRate(h.mfCategory);
+      isAssumed = true;
+    }
+
+    final sipAmt = h.mfSipAmount ?? 0;
+    const horizons = [1, 3, 5, 10];
+    final rateLabel = isAssumed
+        ? '${(rate * 100).toStringAsFixed(0)}% p.a. (est.)'
+        : '${(rate * 100).toStringAsFixed(1)}% p.a. (actual)';
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Row(children: [
+            const Icon(Icons.rocket_launch_rounded, size: 14, color: AppColors.primary),
+            const SizedBox(width: 6),
+            Text('Future Projections', style: GoogleFonts.inter(
+              color: AppColors.text1, fontSize: 12, fontWeight: FontWeight.w700)),
+          ]),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: isAssumed
+                  ? AppColors.warning.withValues(alpha: 0.12)
+                  : AppColors.income.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20)),
+            child: Text(rateLabel,
+              style: GoogleFonts.inter(
+                color: isAssumed ? AppColors.warning : AppColors.income,
+                fontSize: 9, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        const SizedBox(height: 3),
+        Text(
+          isAssumed
+            ? 'Based on category average — not a guarantee'
+            : 'Based on your actual growth rate',
+          style: GoogleFonts.inter(color: AppColors.text3, fontSize: 10)),
+        const SizedBox(height: 10),
+        Row(children: List.generate(horizons.length, (i) {
+          final n = horizons[i];
+          final fv = base * pow(1 + rate, n);
+          double sipFv = 0;
+          if (sipAmt > 0 && rate > 0) {
+            final mr = rate / 12;
+            final months = (n * 12).toDouble();
+            sipFv = sipAmt * ((pow(1 + mr, months) - 1) / mr) * (1 + mr);
+          }
+          final total = fv + sipFv;
+          final isLast = i == horizons.length - 1;
+          return Expanded(child: Container(
+            margin: EdgeInsets.only(right: isLast ? 0 : 6),
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [color.withValues(alpha: 0.15), color.withValues(alpha: 0.05)],
+                begin: Alignment.topLeft, end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.2))),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text('${n}yr', style: GoogleFonts.inter(
+                color: AppColors.text3, fontSize: 10, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 5),
+              Text('₹${_compactVal(total)}', style: GoogleFonts.inter(
+                color: color, fontSize: 13, fontWeight: FontWeight.w900),
+                textAlign: TextAlign.center),
+            ]),
+          ));
+        })),
+        if (sipAmt > 0) ...[
+          const SizedBox(height: 6),
+          Text('✦ Includes ₹${sipAmt.toStringAsFixed(0)}/mo SIP continuation',
+            style: GoogleFonts.inter(color: AppColors.text3, fontSize: 9)),
+        ],
+      ]),
+    );
+  }
+
+  // Category-based historical average annual return assumption
+  static double _assumedRate(String? category) {
+    if (category == null) return 0.10;
+    if (category.startsWith('equity') || category == 'elss' || category == 'index') return 0.12;
+    if (category == 'debt_liquid') return 0.065;
+    if (category.startsWith('debt')) return 0.07;
+    if (category.contains('gold')) return 0.11;
+    if (category.contains('silver')) return 0.10;
+    if (category.startsWith('hybrid')) return 0.10;
+    if (category == 'international_fof') return 0.10;
+    return 0.10;
+  }
+
+  static String _compactVal(double v) {
+    if (v >= 1e7) return '${(v / 1e7).toStringAsFixed(1)}Cr';
+    if (v >= 1e5) return '${(v / 1e5).toStringAsFixed(1)}L';
+    if (v >= 1e3) return '${(v / 1e3).toStringAsFixed(1)}K';
+    return v.toStringAsFixed(0);
   }
 }
 
