@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../core/constants/categories.dart';
 import '../core/database/database_helper.dart';
@@ -18,15 +19,23 @@ class PortfolioProvider extends ChangeNotifier {
   final _db   = DatabaseHelper.instance;
   final _uuid = const Uuid();
 
+  // ── Periodic refresh constants ──────────────────────────────────────────────
+  static const _kLastFetchKey      = 'portfolio_last_price_fetch';
+  /// Minimum hours between automatic background fetches (~3× per day).
+  static const _kFetchIntervalHours = 8;
+
   List<HoldingModel> _holdings = [];
   bool _isLoading      = false;
   bool _isFetching     = false;
   String? _error;
+  DateTime? _lastFetchTime;
 
   List<HoldingModel> get holdings      => _holdings;
   bool get isLoading                   => _isLoading;
   bool get isFetchingPrices            => _isFetching;
   String? get error                    => _error;
+  /// Timestamp of the most recent completed live-price fetch (null = never).
+  DateTime? get lastPriceFetchTime     => _lastFetchTime;
 
   // ── Aggregates ─────────────────────────────────────────────────────────────
 
@@ -198,20 +207,44 @@ class PortfolioProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+    // After rendering cached data, auto-fetch live prices in the background
+    // if the refresh interval has elapsed. Intentionally unawaited.
+    if (_holdings.isNotEmpty && await _shouldAutoFetch()) {
+      fetchLivePrices();
+    }
   }
 
-  /// FIX #5: One batch DB query replaces N individual queries (N+1 eliminated).
+  /// Applies best-known cached prices from DB as the initial display values.
+  /// Uses ticker for stocks/crypto/ETF and scheme code for mutual funds.
+  /// No age gate here — fetchLivePrices() handles freshness via the 8-hour
+  /// interval; showing a slightly stale price is better than showing nothing.
   Future<void> _applyCachedPrices() async {
-    final tickers = _holdings.where((h) => h.ticker != null).map((h) => h.ticker!).toList();
-    if (tickers.isEmpty) return;
-    final cacheMap = await _db.getCachedPrices(tickers);
-    final now = DateTime.now();
+    // Collect unique cache keys: ticker or MF scheme code
+    final keys = _holdings.expand<String>((h) {
+      if (h.ticker != null) return [h.ticker!];
+      if (h.assetClass == 'mutual_fund' && h.mfSchemeCode != null) {
+        return [h.mfSchemeCode!];
+      }
+      return [];
+    }).toSet().toList();
+    if (keys.isEmpty) return;
+    final cacheMap = await _db.getCachedPrices(keys);
     _holdings = _holdings.map((h) {
-      if (h.ticker == null) return h;
-      final c = cacheMap[h.ticker!];
+      // Determine the right cache key for this holding
+      final key = h.ticker ??
+          (h.assetClass == 'mutual_fund' ? h.mfSchemeCode : null);
+      if (key == null) return h;
+      final c = cacheMap[key];
       if (c == null) return h;
-      final ageMin = now.difference(DateTime.parse(c['fetched_at'] as String)).inMinutes;
-      if (ageMin >= 60) return h;
+      if (h.assetClass == 'mutual_fund') {
+        // For MFs the cached price is the NAV; reconstruct current value
+        final nav   = (c['price'] as num).toDouble();
+        final units = (h.meta['units'] as num?)?.toDouble();
+        return h.copyWith(
+          currentPrice: nav,
+          currentValueOverride: units != null ? units * nav : null,
+        );
+      }
       return h.copyWith(
         currentPrice: (c['price'] as num).toDouble(),
         changePct: (c['change_pct'] as num?)?.toDouble(),
@@ -221,8 +254,9 @@ class PortfolioProvider extends ChangeNotifier {
 
   // ── Live Price Fetching ────────────────────────────────────────────────────
 
-  /// FIX #1 + #4: Updates collected into a shared ID-keyed map, applied
-  /// atomically after all fetches complete — no index-based race condition.
+  /// Fetches live prices for all market-linked holdings in parallel.
+  /// Updates are collected into a shared ID-keyed map and applied atomically
+  /// after all fetches complete — no index-based race condition.
   Future<void> fetchLivePrices() async {
     if (_isFetching) return; // prevent overlapping fetch
     _isFetching = true;
@@ -244,6 +278,7 @@ class PortfolioProvider extends ChangeNotifier {
         );
       }).toList();
     }
+    await _markFetched();
     _isFetching = false;
     notifyListeners();
   }
@@ -281,8 +316,12 @@ class PortfolioProvider extends ChangeNotifier {
   }
 
   Future<void> _fetchOneStock(HoldingModel h, Map<String, _PriceUpdate> updates) async {
+    final ticker = h.ticker ?? '';
+    // Tickers are alphanumeric + hyphen only (NSE/BSE format).
+    // Reject anything else to prevent URL path injection.
+    if (ticker.isEmpty || !RegExp(r'^[A-Za-z0-9\-&]+$').hasMatch(ticker)) return;
     try {
-      final sym = h.exchange == 'BSE' ? '${h.ticker}.BO' : '${h.ticker}.NS';
+      final sym = h.exchange == 'BSE' ? '$ticker.BO' : '$ticker.NS';
       final url = Uri.parse('https://query1.finance.yahoo.com/v8/finance/chart/$sym?interval=1d&range=1d');
       final res = await http.get(url, headers: {'User-Agent': 'Mozilla/5.0'}).timeout(const Duration(seconds: 10));
       if (res.statusCode == 200) {
@@ -293,32 +332,81 @@ class PortfolioProvider extends ChangeNotifier {
           final price = (meta['regularMarketPrice'] as num).toDouble();
           final prev  = (meta['chartPreviousClose'] as num?)?.toDouble();
           final chg   = prev != null ? (price - prev) / prev * 100 : null;
-          await _db.upsertPrice(h.ticker!, price, chg);
+          await _db.upsertPrice(ticker, price, chg);
           updates[h.id] = (price: price, changePct: chg, currentValueOverride: null);
         }
       }
     } catch (_) {}
   }
 
+  /// All MF NAV requests run in parallel — same pattern as stocks.
   Future<void> _fetchMfNavs(Map<String, _PriceUpdate> updates) async {
-    final mfs = _holdings.where((h) => h.assetClass == 'mutual_fund' && h.mfSchemeCode != null).toList();
-    for (final h in mfs) {
-      try {
-        final url = Uri.parse('https://api.mfapi.in/mf/${h.mfSchemeCode}/latest');
-        final res = await http.get(url).timeout(const Duration(seconds: 10));
-        if (res.statusCode == 200) {
-          final data   = json.decode(res.body) as Map<String, dynamic>;
-          final navStr = (data['data'] as List?)?.firstOrNull?['nav'] as String?;
-          if (navStr != null) {
-            final nav = double.tryParse(navStr);
-            if (nav != null) {
-              final units = (h.meta['units'] as num?)?.toDouble();
-              final cv    = units != null ? units * nav : null;
-              updates[h.id] = (price: nav, changePct: null, currentValueOverride: cv);
-            }
+    final mfs = _holdings
+        .where((h) => h.assetClass == 'mutual_fund' && h.mfSchemeCode != null)
+        .toList();
+    if (mfs.isEmpty) return;
+    await Future.wait(mfs.map((h) => _fetchOneMfNav(h, updates)));
+  }
+
+  Future<void> _fetchOneMfNav(HoldingModel h, Map<String, _PriceUpdate> updates) async {
+    final code = h.mfSchemeCode!;
+    // mfapi.in scheme codes are purely numeric. Reject anything else to
+    // prevent URL path injection (e.g. code containing '../../').
+    if (!RegExp(r'^\d+$').hasMatch(code)) return;
+    try {
+      final url = Uri.parse('https://api.mfapi.in/mf/$code/latest');
+      final res = await http.get(url).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final data   = json.decode(res.body) as Map<String, dynamic>;
+        final navStr = (data['data'] as List?)?.firstOrNull?['nav'] as String?;
+        if (navStr != null) {
+          final nav = double.tryParse(navStr);
+          if (nav != null) {
+            final units = (h.meta['units'] as num?)?.toDouble();
+            final cv    = units != null ? units * nav : null;
+            // Persist NAV to price_cache (scheme code as key) so it survives
+            // app restarts and is available via _applyCachedPrices().
+            await _db.upsertPrice(code, nav, null);
+            updates[h.id] = (price: nav, changePct: null, currentValueOverride: cv);
           }
         }
-      } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  // ── Periodic-refresh helpers ───────────────────────────────────────────────
+
+  /// Returns true if no fetch has occurred yet, or if at least
+  /// [_kFetchIntervalHours] hours have elapsed since the last one.
+  Future<bool> _shouldAutoFetch() async {
+    try {
+      final prefs  = await SharedPreferences.getInstance();
+      final lastMs = prefs.getInt(_kLastFetchKey);
+      if (lastMs == null) return true;
+      final elapsed = DateTime.now()
+          .difference(DateTime.fromMillisecondsSinceEpoch(lastMs));
+      return elapsed.inHours >= _kFetchIntervalHours;
+    } catch (_) {
+      return false; // be conservative on prefs errors
+    }
+  }
+
+  /// Persists the current timestamp as the last-fetch marker.
+  Future<void> _markFetched() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now   = DateTime.now();
+      await prefs.setInt(_kLastFetchKey, now.millisecondsSinceEpoch);
+      _lastFetchTime = now;
+    } catch (_) {}
+  }
+
+  /// Called on app resume (via [WidgetsBindingObserver] in the shell).
+  /// Silently triggers a background price refresh if the interval has elapsed.
+  Future<void> refreshIfStale() async {
+    if (_holdings.isEmpty || _isFetching) return;
+    if (await _shouldAutoFetch()) {
+      fetchLivePrices(); // intentionally unawaited
     }
   }
 

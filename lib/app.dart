@@ -51,11 +51,32 @@ class _AppShell extends StatefulWidget {
   State<_AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<_AppShell> {
+class _AppShellState extends State<_AppShell> with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   // FAB only on Home + Txns — all other tabs have their own actions or none
   static const _noFabIndices = {2, 3, 4, 5, 6};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Called by Flutter whenever the app lifecycle changes.
+  /// On resume, silently refresh prices if the 8-hour interval has elapsed.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<PortfolioProvider>().refreshIfStale();
+    }
+  }
 
   final _screens = const [
     DashboardScreen(),
